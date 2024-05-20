@@ -12,7 +12,7 @@ pub mod model {
 use super::data::MNISTBatch;
 use burn::{module::Module, tensor::{Tensor, backend::{AutodiffBackend, Backend}},
     train::{ClassificationOutput, TrainOutput, TrainStep, ValidStep},
-    nn::{self, loss::CrossEntropyLoss, BatchNorm, PaddingConfig2d},
+    nn::{self, loss::CrossEntropyLossConfig, BatchNorm, PaddingConfig2d},
 };
 
 #[derive(Module, Debug)] pub struct Model<B: Backend> {
@@ -22,22 +22,22 @@ use burn::{module::Module, tensor::{Tensor, backend::{AutodiffBackend, Backend}}
     dropout: nn::Dropout,
     fc1: nn::Linear<B>,
     fc2: nn::Linear<B>,
-    activation: nn::GELU,
+    activation: nn::Gelu,
 }
 
-impl<B: Backend> Default for Model<B> { fn default() -> Self { Self::new() } }
+impl<B: Backend> Default for Model<B> { fn default() -> Self { Self::new(&B::Device::default()) } }
 
 impl<B: Backend> Model<B> {
-    pub fn new() -> Self {
-        let conv1 = ConvBlock::new([ 1,  8], [3, 3]); // out: [Batch,8,26,26]
-        let conv2 = ConvBlock::new([ 8, 16], [3, 3]); // out: [Batch,16,24x24]
-        let conv3 = ConvBlock::new([16, 24], [3, 3]); // out: [Batch,24,22x22]
+    pub fn new(device: &B::Device) -> Self {
+        let conv1 = ConvBlock::new([ 1,  8], [3, 3], device); // out: [Batch,8,26,26]
+        let conv2 = ConvBlock::new([ 8, 16], [3, 3], device); // out: [Batch,16,24x24]
+        let conv3 = ConvBlock::new([16, 24], [3, 3], device); // out: [Batch,24,22x22]
         let fc1 = nn::LinearConfig::new(24 * 32 * 22, 32)
-            .with_bias(false).init();
-        let fc2 = nn::LinearConfig::new(32, 10).with_bias(false).init();
+            .with_bias(false).init(device);
+        let fc2 = nn::LinearConfig::new(32, 10).with_bias(false).init(device);
         let dropout = nn::DropoutConfig::new(0.5).init();
 
-        Self { conv1, conv2, conv3, dropout, fc1, fc2, activation: nn::GELU::new(), }
+        Self { conv1, conv2, conv3, dropout, fc1, fc2, activation: nn::Gelu::new(), }
     }
 
     pub fn forward(&self, input: Tensor<B, 3>) -> Tensor<B, 2> {
@@ -61,7 +61,7 @@ impl<B: Backend> Model<B> {
     pub fn forward_classification(&self, item: MNISTBatch<B>) -> ClassificationOutput<B> {
         let targets = item.targets;
         let output = self.forward(item.images);
-        let loss = CrossEntropyLoss::default()
+        let loss = CrossEntropyLossConfig::new().init(&output.device())
             .forward(output.clone(), targets.clone());
 
         ClassificationOutput { loss, output, targets, }
@@ -71,22 +71,20 @@ impl<B: Backend> Model<B> {
 #[derive(Module, Debug)] pub struct ConvBlock<B: Backend> {
     conv: nn::conv::Conv2d<B>,
     norm: BatchNorm<B, 2>,
-    activation: nn::GELU,
+    activation: nn::Gelu,
 }
 
 impl<B: Backend> ConvBlock<B> {
-    pub fn new(channels: [usize; 2], kernel_size: [usize; 2]) -> Self {
+    pub fn new(channels: [usize; 2], kernel_size: [usize; 2], device: &B::Device) -> Self {
         let conv = nn::conv::Conv2dConfig::new(channels, kernel_size)
-            .with_padding(PaddingConfig2d::Valid).init();
-        let norm = nn::BatchNormConfig::new(channels[1]).init();
-
-        Self { conv, norm, activation: nn::GELU::new(), }
+            .with_padding(PaddingConfig2d::Valid).init(device);
+        let norm = nn::BatchNormConfig::new(channels[1]).init(device);
+        Self { conv, norm, activation: nn::Gelu::new(), }
     }
 
     pub fn forward(&self, input: Tensor<B, 4>) -> Tensor<B, 4> {
         let x = self.conv.forward(input);
         let x = self.norm.forward(x);
-
         self.activation.forward(x)
     }
 }
@@ -94,7 +92,6 @@ impl<B: Backend> ConvBlock<B> {
 impl<B: AutodiffBackend> TrainStep<MNISTBatch<B>, ClassificationOutput<B>> for Model<B> {
     fn step(&self, item: MNISTBatch<B>) -> TrainOutput<ClassificationOutput<B>> {
         let item = self.forward_classification(item);
-
         TrainOutput::new(self, item.loss.backward(), item)
     }
 }
@@ -109,33 +106,31 @@ impl<B: Backend> ValidStep<MNISTBatch<B>,  ClassificationOutput<B>> for Model<B>
 
 pub mod data {
 
-use burn::{tensor::{backend::Backend, Data, ElementConversion, Int, Tensor},
-    data::{dataloader::batcher::Batcher, dataset::source::huggingface::MNISTItem},
+use burn::{tensor::{backend::Backend, ElementConversion, Data, Int, Tensor},
+    data::{dataloader::batcher::Batcher, dataset::vision::MnistItem},
 };
 
-pub struct MNISTBatcher<B: Backend> { device: B::Device, }
+#[derive(Clone)] pub struct MNISTBatcher<B: Backend> { device: B::Device, }
 
 impl<B: Backend> MNISTBatcher<B> { pub fn new(device: B::Device) -> Self { Self { device } } }
 
-impl<B: Backend> Batcher<MNISTItem, MNISTBatch<B>> for MNISTBatcher<B> {
-    fn batch(&self, items: Vec<MNISTItem>) -> MNISTBatch<B> {
-        let images = items.iter()
-            .map(|item| Data::<f32, 2>::from(item.image))
-            .map(|data| Tensor::<B, 2>::from_data(data.convert()))
-            .map(|tensor| tensor.reshape([1, 28, 28]))
+impl<B: Backend> Batcher<MnistItem, MNISTBatch<B>> for MNISTBatcher<B> {
+    fn batch(&self, items: Vec<MnistItem>) -> MNISTBatch<B> {
+        let images = items.iter().map(|item|
+            Data::<f32, 2>::from(item.image)).map(|data|
+            Tensor::<B, 2>::from_data(data.convert(), &self.device)).map(|tensor|
+            tensor.reshape([1, 28, 28])).map(|tensor|
             // normalize: make between [0,1] and make the mean =  0 and std = 1
             // values mean=0.1307,std=0.3081 were copied from Pytorch Mist Example
             // https://github.com/pytorch/examples/blob/54f4572509891883a947411fd7239237dd2a39c3/mnist/main.py#L122
-            .map(|tensor| ((tensor / 255) - 0.1307) / 0.3081).collect();
+            ((tensor / 255) - 0.1307) / 0.3081).collect();
 
         let targets = items.iter()
             .map(|item| Tensor::<B, 1, Int>::from_data(
-                Data::from([(item.label as i64).elem()]))).collect();
+                Data::from([(item.label as i64).elem()]), &self.device)).collect();
 
-        let images = Tensor::cat(images, 0).to_device(&self.device);
-        let targets = Tensor::cat(targets, 0).to_device(&self.device);
-
-        MNISTBatch { images, targets }
+        MNISTBatch { images: Tensor::cat( images, 0).to_device(&self.device),
+                    targets: Tensor::cat(targets, 0).to_device(&self.device)}
     }
 }
 
@@ -152,7 +147,7 @@ use super::{model::Model, data::MNISTBatcher};
 use burn::{config::Config, module::Module, tensor::backend::AutodiffBackend,
     record::{CompactRecorder, NoStdTrainingRecorder},
     optim::{AdamConfig, decay::WeightDecayConfig},
-    data::{dataloader::DataLoaderBuilder, dataset::source::huggingface::MNISTDataset},
+    data::{dataloader::DataLoaderBuilder, dataset::vision::MnistDataset},
     train::{MetricEarlyStoppingStrategy, StoppingCondition, LearnerBuilder,
         metric::{CpuUse, CpuMemory, CpuTemperature,
             LossMetric, AccuracyMetric, store::{Aggregate, Direction, Split}}
@@ -182,10 +177,10 @@ pub fn train<B: AutodiffBackend>(artifact_dir: &str, device: B::Device)
 
     let dataloader_train = DataLoaderBuilder::new(MNISTBatcher::<B>::new(device.clone()))
         .batch_size(config.batch_size).shuffle(config.seed)
-        .num_workers(config.num_workers).build(MNISTDataset::train());
+        .num_workers(config.num_workers).build(MnistDataset::train());
     let dataloader_test  = DataLoaderBuilder::new(batcher_valid)
         .batch_size(config.batch_size).shuffle(config.seed)
-        .num_workers(config.num_workers).build(MNISTDataset::test());
+        .num_workers(config.num_workers).build(MnistDataset::test());
 
     // Model
     let learner = LearnerBuilder::new(artifact_dir)
@@ -202,8 +197,8 @@ pub fn train<B: AutodiffBackend>(artifact_dir: &str, device: B::Device)
         .with_file_checkpointer(CompactRecorder::new())
         .early_stopping(MetricEarlyStoppingStrategy::new::<LossMetric<B>>(Aggregate::Mean,
             Direction::Lowest, Split::Valid, StoppingCondition::NoImprovementSince { n_epochs: 1 },
-        )).devices(vec![device]).num_epochs(config.num_epochs)
-        .build(Model::new(), config.optimizer.init(), 1e-4);
+        )).devices(vec![device.clone()]).num_epochs(config.num_epochs)
+        .build(Model::new(&device), config.optimizer.init(), 1e-4);
 
     learner.fit(dataloader_train, dataloader_test).save_file(format!("{artifact_dir}/model"),
         &NoStdTrainingRecorder::new())?;    Ok(())
