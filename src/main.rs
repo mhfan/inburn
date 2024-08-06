@@ -1,6 +1,7 @@
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     use burn::{tensor::Tensor, backend::Wgpu as Backend};
+    //type Backend = Wgpu;  // NdArray<f32>; LibTorch<f32>; Candle<f32, i64>;
 
     // Creation of two tensors, the first with explicit values
     // and the second one with ones, with the same shape as the first
@@ -10,14 +11,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Print the element-wise addition (done with the WGPU backend) of the two tensors.
     println!("{}", tensor_1 + tensor_2);
 
-    use inburn::mnist::training::train;
-    use burn::backend::{Autodiff, Wgpu, wgpu::WgpuDevice};
-    //use burn::backend::{NdArrayBackend, ndarray::NdArrayDevice};
-
-    let artifact_dir = "data/mnist";
-    train::<Autodiff<Wgpu>>(artifact_dir, WgpuDevice::default())?;
-    //train::<Autodiff<NdArrayBackend>>(artifact_dir, NdArrayDevice::Cpu)?;
-
+    inburn::guide::demo_main()?;
     Ok(())
 }
 

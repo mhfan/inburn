@@ -13,10 +13,11 @@ keywords = [  "deep-learning", "reinforcement-learning", "machine-learning", "ne
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]  # git = "https://github.com/Tracel-AI/burn"
-burn = { version = "0.13", features = [ "train", "vision", "wgpu", "ndarray" ] }
-serde = "1.0"
+burn = { version = "0.13", features = [ "ndarray", "train", "vision", "wgpu", ] }
+#serde = "1.0"
 
 [build-dependencies]
+burn-common = { version = "0.13", features = [ "network" ] }
 burn-import = "0.13"
 chrono = "0.4"
 

@@ -6,7 +6,8 @@
  ****************************************************************/
 
 pub mod guide;
-pub mod mnist;
 
-pub mod mnist_onnx { include!(concat!(env!("OUT_DIR"), "/model/mnist.rs")); }
+pub mod mnist_onnx {    //  https://github.com/onnx/tutorials, https://netron.app
+    include!(concat!(env!("OUT_DIR"), "/model/mnist.rs"));
+}
 
