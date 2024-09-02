@@ -156,7 +156,7 @@ impl ModelConfig {  /// Returns the initialized model.
 
 pub mod data {
 
-use burn::{tensor::{backend::Backend, ElementConversion, Data, Int, Tensor},
+use burn::{tensor::{backend::Backend, ElementConversion, TensorData, Int, Tensor},
     data::{dataloader::batcher::Batcher, dataset::vision::MnistItem},
 };
 
@@ -166,9 +166,9 @@ impl<B: Backend> MnistBatcher<B> { pub fn new(device: B::Device) -> Self { Self 
 
 impl<B: Backend> Batcher<MnistItem, MnistBatch<B>> for MnistBatcher<B> {
     fn batch(&self, items: Vec<MnistItem>) -> MnistBatch<B> {
-        let images = items.iter().map(|item| // TensorData
-            Data::<f32, 2>::from(item.image)).map(|data|
-            Tensor::<B, 2>::from_data(data.convert(), &self.device)).map(|tensor|
+        let images = items.iter().map(|item|
+            TensorData::from(item.image)).map(|data|
+            Tensor::<B, 2>::from_data(data, &self.device)).map(|tensor|
             tensor.reshape([1, 28, 28])).map(|tensor|
             // Normalize: make between [0,1] and make the mean=0 and std=1
             // values mean=0.1307,std=0.3081 are copied from PyTorch MNIST example
@@ -177,7 +177,7 @@ impl<B: Backend> Batcher<MnistItem, MnistBatch<B>> for MnistBatcher<B> {
 
         let targets = items.iter()
             .map(|item| Tensor::<B, 1, Int>::from_data(
-                Data::from([(item.label as i64).elem()]), &self.device)).collect();
+                [(item.label as i32).elem::<B::IntElem>()], &self.device)).collect();
 
         MnistBatch { images: Tensor::cat( images, 0).to_device(&self.device),
                     targets: Tensor::cat(targets, 0).to_device(&self.device) }
